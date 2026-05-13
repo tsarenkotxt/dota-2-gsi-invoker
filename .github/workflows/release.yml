@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "release/v*"
+
+permissions:
+  contents: write
+
+env:
+  RUST_VERSION: 1.95.0
+  WINDOWS_ARCHIVE: dota_2_gsi_invoker_windows_x64.zip
+
+jobs:
+  release-windows-x64:
+    name: Release Windows x64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install "${RUST_VERSION}" --profile minimal
+          rustup default "${RUST_VERSION}"
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libxkbcommon-dev libwayland-dev libxcb1-dev mingw-w64 zip
+
+      - name: Install Rust components and fetch dependencies
+        run: make init
+
+      - name: Run format check, tests, and Clippy
+        run: make test
+
+      - name: Build Windows release
+        run: make release-windows
+
+      - name: Create Windows archive
+        run: |
+          cd release/windows
+          zip -9 "../../${WINDOWS_ARCHIVE}" \
+            dota_2_gsi_invoker.exe \
+            dota_2_gsi_invoker_config.json \
+            gamestate_integration_dota_2_gsi_invoker.cfg
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            "${WINDOWS_ARCHIVE}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "Windows x64 release for ${GITHUB_REF_NAME}"

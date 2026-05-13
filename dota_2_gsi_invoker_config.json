@@ -1,0 +1,31 @@
+{
+  "gsi_port": 53000,
+  "debug_gsi": false,
+  "show_footer_row": true,
+  "overlay_x": 1916,
+  "overlay_y": 1301,
+  "skill_mana_cost": {
+    "cold_snap": 100,
+    "chaos_meteor": 200,
+    "deafening_blast": 250,
+    "ice_wall": 125,
+    "ghost_walk": 175,
+    "sun_strike": 175,
+    "emp": 125,
+    "alacrity": 75,
+    "forge_spirit": 75,
+    "tornado": 140
+  },
+  "skill_order": [
+    "cold_snap",
+    "chaos_meteor",
+    "deafening_blast",
+    "ice_wall",
+    "ghost_walk",
+    "sun_strike",
+    "emp",
+    "alacrity",
+    "forge_spirit",
+    "tornado"
+  ]
+}
