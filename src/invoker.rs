@@ -2,7 +2,7 @@ use std::time::Instant;
 
 const READY_THRESHOLD_SECONDS: f32 = 0.05;
 const REFRESH_DETECTION_SECONDS: f32 = 0.5;
-const REFRESH_DETECTION_COUNT: usize = 2;
+const REFRESH_DETECTION_COUNT: usize = 1;
 
 pub const CANONICAL_SPELLS: [InvokerSpell; 10] = [
     InvokerSpell::new("cold_snap", "Cold_Snap.webp"),
@@ -40,6 +40,7 @@ pub struct SpellSnapshot {
 #[derive(Clone, Debug)]
 pub struct CooldownUpdate {
     pub is_invoker: bool,
+    pub is_play_active: bool,
     pub is_hero_demo: bool,
     pub paused: bool,
     pub current_mana: Option<f32>,
@@ -49,6 +50,7 @@ pub struct CooldownUpdate {
 #[derive(Clone, Debug)]
 pub struct CooldownState {
     is_invoker: bool,
+    is_play_active: bool,
     paused: bool,
     pause_started: Option<Instant>,
     current_mana: Option<f32>,
@@ -60,6 +62,7 @@ impl CooldownState {
     pub fn new() -> Self {
         Self {
             is_invoker: false,
+            is_play_active: false,
             paused: false,
             pause_started: None,
             current_mana: None,
@@ -72,6 +75,7 @@ impl CooldownState {
         let now = Instant::now();
         self.apply_pause_state(update.paused, now);
         self.is_invoker = update.is_invoker;
+        self.is_play_active = update.is_play_active;
         if !self.paused {
             self.current_mana = update.current_mana;
         }
@@ -131,6 +135,7 @@ impl CooldownState {
 
         OverlaySnapshot {
             is_invoker: self.is_invoker,
+            is_play_active: self.is_play_active,
             paused: self.paused,
             connected: self
                 .last_update
@@ -185,10 +190,17 @@ impl CooldownState {
 #[derive(Clone, Debug)]
 pub struct OverlaySnapshot {
     pub is_invoker: bool,
+    pub is_play_active: bool,
     pub paused: bool,
     pub connected: bool,
     pub current_mana: Option<f32>,
     pub spells: [SpellSnapshot; 10],
+}
+
+impl OverlaySnapshot {
+    pub fn should_display(&self) -> bool {
+        self.is_invoker && self.is_play_active && (self.connected || self.paused)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -242,6 +254,51 @@ mod tests {
     }
 
     #[test]
+    fn paused_invoker_play_active_snapshot_should_display() {
+        let mut state = CooldownState::new();
+        state.is_invoker = true;
+        state.is_play_active = true;
+        state.paused = true;
+
+        let snapshot = state.snapshot();
+
+        assert!(!snapshot.connected);
+        assert!(snapshot.should_display());
+        assert!(snapshot.is_invoker);
+        assert!(snapshot.is_play_active);
+        assert!(snapshot.paused);
+    }
+
+    #[test]
+    fn paused_non_invoker_snapshot_stays_disconnected() {
+        let mut state = CooldownState::new();
+        state.is_invoker = false;
+        state.paused = true;
+
+        let snapshot = state.snapshot();
+
+        assert!(!snapshot.connected);
+        assert!(!snapshot.should_display());
+        assert!(!snapshot.is_invoker);
+        assert!(snapshot.paused);
+    }
+
+    #[test]
+    fn invoker_before_play_active_stays_disconnected() {
+        let mut state = CooldownState::new();
+        state.is_invoker = true;
+        state.is_play_active = false;
+        state.paused = true;
+
+        let snapshot = state.snapshot();
+
+        assert!(!snapshot.connected);
+        assert!(!snapshot.should_display());
+        assert!(snapshot.is_invoker);
+        assert!(!snapshot.is_play_active);
+    }
+
+    #[test]
     fn external_refresh_clears_all_tracked_cooldowns() {
         let now = Instant::now();
         let mut state = CooldownState::new();
@@ -255,6 +312,7 @@ mod tests {
 
         let mut update = CooldownUpdate {
             is_invoker: true,
+            is_play_active: true,
             is_hero_demo: true,
             paused: false,
             current_mana: Some(300.0),
@@ -284,7 +342,7 @@ mod tests {
     }
 
     #[test]
-    fn single_ready_spell_does_not_clear_other_cooldowns() {
+    fn single_ready_spell_clears_tracked_cooldowns_in_hero_demo() {
         let now = Instant::now();
         let mut state = CooldownState::new();
         state.is_invoker = true;
@@ -297,6 +355,42 @@ mod tests {
 
         let mut update = CooldownUpdate {
             is_invoker: true,
+            is_play_active: true,
+            is_hero_demo: true,
+            paused: false,
+            current_mana: Some(300.0),
+            spells: [SpellSnapshot::default(); 10],
+        };
+        update.spells[0] = SpellSnapshot {
+            cooldown_remaining: 0.0,
+            cooldown_total: 0.0,
+            mana_cost: None,
+            known: true,
+        };
+
+        state.apply(update);
+
+        assert!(
+            state
+                .spells
+                .iter()
+                .all(|spell| spell.cooldown_until.is_none())
+        );
+    }
+
+    #[test]
+    fn single_ready_spell_near_expiry_does_not_clear_other_cooldowns() {
+        let now = Instant::now();
+        let mut state = CooldownState::new();
+        state.is_invoker = true;
+        state.spells[0].known = true;
+        state.spells[0].cooldown_until = Some(now + Duration::from_millis(100));
+        state.spells[1].known = true;
+        state.spells[1].cooldown_until = Some(now + Duration::from_secs(12));
+
+        let mut update = CooldownUpdate {
+            is_invoker: true,
+            is_play_active: true,
             is_hero_demo: true,
             paused: false,
             current_mana: Some(300.0),
@@ -320,6 +414,7 @@ mod tests {
         let mut state = CooldownState::new();
         let mut update = CooldownUpdate {
             is_invoker: true,
+            is_play_active: true,
             is_hero_demo: true,
             paused: false,
             current_mana: Some(300.0),
@@ -353,6 +448,7 @@ mod tests {
 
         let mut update = CooldownUpdate {
             is_invoker: true,
+            is_play_active: true,
             is_hero_demo: false,
             paused: false,
             current_mana: Some(300.0),

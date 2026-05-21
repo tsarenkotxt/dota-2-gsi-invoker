@@ -2,12 +2,16 @@ use serde_json::Value;
 
 use crate::invoker::{CooldownUpdate, SpellSnapshot, spell_index};
 
+const DOTA_PRE_GAME: &str = "DOTA_GAMERULES_STATE_PRE_GAME";
+const DOTA_GAME_IN_PROGRESS: &str = "DOTA_GAMERULES_STATE_GAME_IN_PROGRESS";
+
 pub fn parse_invoker_cooldowns(payload: &[u8]) -> anyhow::Result<CooldownUpdate> {
     let value: Value = serde_json::from_slice(payload)?;
     let is_invoker = value
         .pointer("/hero/name")
         .and_then(Value::as_str)
         .is_some_and(|name| name == "npc_dota_hero_invoker");
+    let is_play_active = string_at(&value, &["/map/game_state"]).is_some_and(is_play_active_state);
     let paused = bool_at(&value, &["/map/paused"]).unwrap_or_default();
     let is_hero_demo = string_at(&value, &["/map/name"])
         .is_some_and(|name| name == "hero_demo_main")
@@ -49,6 +53,7 @@ pub fn parse_invoker_cooldowns(payload: &[u8]) -> anyhow::Result<CooldownUpdate>
 
     Ok(CooldownUpdate {
         is_invoker,
+        is_play_active,
         is_hero_demo,
         paused,
         current_mana,
@@ -60,6 +65,10 @@ fn string_at<'a>(value: &'a Value, pointers: &[&str]) -> Option<&'a str> {
     pointers
         .iter()
         .find_map(|pointer| value.pointer(pointer).and_then(Value::as_str))
+}
+
+fn is_play_active_state(game_state: &str) -> bool {
+    matches!(game_state, DOTA_PRE_GAME | DOTA_GAME_IN_PROGRESS)
 }
 
 fn bool_at(value: &Value, pointers: &[&str]) -> Option<bool> {
@@ -108,6 +117,7 @@ mod tests {
             "hero": {"name": "npc_dota_hero_invoker"},
             "map": {
                 "name": "hero_demo_main",
+                "game_state": "DOTA_GAMERULES_STATE_GAME_IN_PROGRESS",
                 "paused": true,
                 "customgamename": "common/dota 2 beta/game/dota_addons/hero_demo"
             },
@@ -121,6 +131,7 @@ mod tests {
         let update = parse_invoker_cooldowns(payload).unwrap();
 
         assert!(update.is_invoker);
+        assert!(update.is_play_active);
         assert!(update.is_hero_demo);
         assert!(update.paused);
         assert_eq!(update.current_mana, Some(120.0));
@@ -143,5 +154,41 @@ mod tests {
 
         assert!(update.is_invoker);
         assert!(!update.is_hero_demo);
+    }
+
+    #[test]
+    fn detects_pre_game_as_play_active() {
+        let payload = br#"{
+            "hero": {"name": "npc_dota_hero_invoker"},
+            "map": {
+                "name": "start",
+                "game_state": "DOTA_GAMERULES_STATE_PRE_GAME",
+                "paused": false
+            },
+            "abilities": {}
+        }"#;
+
+        let update = parse_invoker_cooldowns(payload).unwrap();
+
+        assert!(update.is_invoker);
+        assert!(update.is_play_active);
+    }
+
+    #[test]
+    fn detects_hero_selection_as_not_play_active() {
+        let payload = br#"{
+            "hero": {"name": "npc_dota_hero_invoker"},
+            "map": {
+                "name": "start",
+                "game_state": "DOTA_GAMERULES_STATE_HERO_SELECTION",
+                "paused": false
+            },
+            "abilities": {}
+        }"#;
+
+        let update = parse_invoker_cooldowns(payload).unwrap();
+
+        assert!(update.is_invoker);
+        assert!(!update.is_play_active);
     }
 }

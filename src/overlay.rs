@@ -99,7 +99,7 @@ impl eframe::App for InvokerOverlay {
         self.configure_mouse_passthrough(ctx);
 
         let snapshot = self.state.read().snapshot();
-        if !(snapshot.connected && snapshot.is_invoker) {
+        if !snapshot.should_display() {
             ctx.request_repaint_after(Duration::from_millis(250));
             return;
         }
@@ -142,12 +142,10 @@ impl eframe::App for InvokerOverlay {
                     let rect = Rect::from_min_size(min, Vec2::splat(TILE));
                     let spell_state = snapshot.spells[spell_index];
                     let mana_cost = spell_state.mana_cost.unwrap_or(skill.mana_cost);
-                    let missing_mana = snapshot.connected
-                        && snapshot.is_invoker
-                        && snapshot
-                            .current_mana
-                            .zip(Some(mana_cost))
-                            .is_some_and(|(mana, cost)| mana + 0.5 < cost as f32);
+                    let missing_mana = snapshot
+                        .current_mana
+                        .zip(Some(mana_cost))
+                        .is_some_and(|(mana, cost)| mana + 0.5 < cost as f32);
 
                     painter.rect_filled(rect, CornerRadius::same(4), Color32::from_rgb(10, 11, 13));
 
